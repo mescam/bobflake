@@ -1,0 +1,78 @@
+name: Update Bob Shell
+
+on:
+  schedule:
+    - cron: "20 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Check for new version
+        id: check
+        run: |
+          set -euo pipefail
+          LATEST=$(curl -fsSL "https://s3.us-south.cloud-object-storage.appdomain.cloud/bob-shell/bobshell-version.txt" | tr -d '[:space:]')
+          CURRENT=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' flake.nix | head -1)
+          echo "latest=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          if [[ "$CURRENT" == "$LATEST" ]]; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "Already up to date: ${CURRENT}"
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "Update available: ${CURRENT} → ${LATEST}"
+          fi
+
+      - name: Update flake.nix
+        if: steps.check.outputs.updated == 'true'
+        env:
+          VERSION: ${{ steps.check.outputs.latest }}
+        run: |
+          set -euo pipefail
+          URL="https://s3.us-south.cloud-object-storage.appdomain.cloud/bob-shell/bobshell-${VERSION}.tgz"
+          HASH=$(nix store prefetch-file --json --hash-type sha256 "$URL" | jq -r '.hash')
+
+          sed -i "0,/version = \".*\";/s/version = \".*\";/version = \"${VERSION}\";/" flake.nix
+          sed -i "s|hash = \"sha256-[^\"]*\"|hash = \"${HASH}\"|" flake.nix
+
+          echo "Updated to ${VERSION} with hash ${HASH}"
+
+      - name: Verify build
+        if: steps.check.outputs.updated == 'true'
+        run: nix build --print-out-paths
+
+      - name: Create pull request
+        if: steps.check.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.latest }}
+        run: |
+          set -euo pipefail
+          BRANCH="update/bobshell-${VERSION}"
+
+          EXISTING=$(gh pr list --search "head:${BRANCH}" --json number --jq '.[0].number' || true)
+          if [[ -n "$EXISTING" ]]; then
+            echo "PR #${EXISTING} already exists for this version"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add flake.nix
+          git commit -m "chore: update bobshell to ${VERSION}"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --title "chore: update bobshell to ${VERSION}" \
+            --body "Automated update of IBM Bob Shell to version **${VERSION}**." \
+            --label "dependencies,automated"
