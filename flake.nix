@@ -9,7 +9,7 @@
     let
       supportedSystems = [ "aarch64-darwin" "x86_64-darwin" "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      version = "1.0.3";
+      version = "1.0.4";
     in
     {
       packages = forAllSystems (system:
@@ -25,7 +25,7 @@
 
             src = pkgs.fetchurl {
               url = "https://s3.us-south.cloud-object-storage.appdomain.cloud/bob-shell/bobshell-${version}.tgz";
-              hash = "sha256-nABXSY5S4wHJd4Hbi4Kr/WfDQnP42qJw27a+Y58kOk8=";
+              hash = "sha256-Eo+NqLw6Sh6wet1KvPBTBglmFfF3oy0CBYUyyUW1SJ4=";
             };
 
             nativeBuildInputs = [ pkgs.makeWrapper ];
